@@ -1,0 +1,42 @@
+int x = 10
+x = (x + 2) * 3
+print x
+print -x + 2
+ptr p = malloc(2 * 4)
+*p = 42
+p[1] = -7
+print *p
+print p[1]
+ptr alias = p
+alias[0] = 99
+print *p
+ptr next = p + 1
+print *next
+print next - p
+next = 1 + p
+*(p + 1) = 20
+print *(p + 1)
+next = next - 1
+print *next
+show
+enter helper
+int x = 5
+print x
+show
+leave
+print x
+free(p)
+p = NULL
+alias = NULL
+next = NULL
+ptr zeroed = calloc(2, 4)
+print zeroed[0]
+print zeroed[1]
+show
+free(zeroed)
+zeroed = NULL
+free(NULL)
+print NULL
+show
+leave
+quit
