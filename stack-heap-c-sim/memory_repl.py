@@ -16,9 +16,23 @@ from stack_heap import Allocator, Heap, Pointer, Stack, StackFrame
 
 
 class MemoryMachine:
+    '''
+    Runs a C-like memory commands using a simulated stack and heap.
+    Integers in heap memory use four little-endian ordered bytes.
+    
+    Attributes
+    ----------
+    stack : Stack
+        active function frames and their local variables
+    heap : Heap
+        byte-addressable memory used for allocations
+    allocator : Allocator
+        manager for free and allocated regions of the heap
+    '''
+
     def __init__(self, heap_capacity=64, stack_capacity=16):
         self.stack = Stack(stack_capacity)
-        self.stack.push_frame(StackFrame('main'))
+        self.stack.push_frame(StackFrame('main')) #So you start in main
         self.heap = Heap(heap_capacity)
         self.allocator = Allocator(self.heap)
 
@@ -32,12 +46,40 @@ class MemoryMachine:
         return int.from_bytes(data, 'little', signed=True)
 
     def destination(self, text):
+        '''
+        Resolve a dereference/array element into writable pointer.
+        
+        Parameters
+        ----------
+        text : str
+            assignment target (ex. *p or p[2])
+        Returns
+        -------
+        Pointer : address where the integer should be stored
+        '''
         if text.startswith('*'):
             return self.pointer(self.value(text[1:]))
         base, index = text.rsplit('[', 1)
         return self.pointer(self.value(base)).offset(self.value(index[:-1]) * 4)
 
     def binary(self, op, left, right):
+        '''
+        Apply arithmetic operator to integers/pointers.
+        Pointer offsets count four-byte integers; integer division truncates
+        to zero. Rejects unsupported operand combinations.
+        
+        Parameters
+        ----------
+        op : str
+            operators +, -, *, /, or %
+        left : int or Pointer
+            value on the left side of the operator
+        right : int or Pointer
+            value on the right side of the operator
+        Returns
+        -------
+        int or Pointer : result of the arithmetic operation
+        '''
         if isinstance(left, Pointer) or isinstance(right, Pointer):
             if op == '+' and isinstance(left, int) and isinstance(right, Pointer):
                 return right.offset(left * 4)
@@ -54,18 +96,30 @@ class MemoryMachine:
             return left - right
         if op == '*':
             return left * right
-        # C integer division truncates toward zero, including negative operands.
+        # C int division truncates to zero even for negative numbers.
         quotient = (abs(left) // abs(right)) * (-1 if (left < 0) != (right < 0) else 1)
         return quotient if op == '/' else left - quotient * right
 
     def value(self, text):
-        # Small expression parser: no eval, function calls, or Python execution.
+        '''
+        Parse and evaluate an expression. Handles local variables, NULL, 
+        arithmetic, parentheses, pointer dereferences, and array indexing using
+        the regular operator precedence (for what is implemented).
+        
+        Parameters
+        ----------
+        text : str
+            C-like expression to evaluate
+        Returns
+        -------
+        int, Pointer, or None : evaluated value, with None representing NULL
+        '''
         tokens = re.findall(r'\d+|[A-Za-z_]\w*|[^\s]', text) + ['<end>']
         position = 0
         precedence = {'+': 1, '-': 1, '*': 2, '/': 2, '%': 2}
 
         def take(expected=None):
-            nonlocal position
+            nonlocal position   # makes position assignment so much easier
             token = tokens[position]
             if expected is not None and token != expected:
                 raise SyntaxError(f'Expected {expected}, got {token}')
@@ -73,6 +127,15 @@ class MemoryMachine:
             return token
 
         def unary():
+            '''
+            Read a value with any leading unary operators or array indexing.
+            Resolve variable names in the current frame and read dereferenced
+            pointers as four-byte integers.
+            
+            Returns
+            -------
+            int, Pointer, or None : value of the parsed operand
+            '''
             token = take()
             if token in ('+', '-', '*'):
                 result = unary()
@@ -98,6 +161,17 @@ class MemoryMachine:
             return result
 
         def expression(minimum=0):
+            '''
+            Combine operands while respecting operator precedence.
+            
+            Parameters
+            ----------
+            minimum : int
+                lowest operator precedence to consume in this call
+            Returns
+            -------
+            int, Pointer, or None : value of the parsed expression
+            '''
             left = unary()
             while precedence.get(tokens[position], -1) >= minimum:
                 op = take()
@@ -110,6 +184,19 @@ class MemoryMachine:
         return result
 
     def execute(self, command):
+        '''
+        Execute one C-like command/update memory. Handle frame changes, 
+        allocations, frees, assignments, and expression output. Empty 
+        commands and show leave the machine unchanged.
+        
+        Parameters
+        ----------
+        command : str
+            command entered by the user, optionally ending with a semicolon
+        Returns
+        -------
+        str, int, Pointer, or None : output to display, or None for no output
+        '''
         command = command.strip().rstrip(';').strip()
         if not command or command == 'show':
             return
@@ -158,6 +245,14 @@ class MemoryMachine:
             return 'NULL' if value is None else value
 
     def render(self):
+        '''
+        Builds a text view of the stack, heap blocks, and raw memory.
+        Shows local values, allocation ranges, complete four-byte integers
+        within allocated blocks, and the heap bytes in hexadecimal.
+        Returns
+        -------
+        str : formatted view of the current memory state
+        '''
         lines = ['STACK']
         for frame in reversed(self.stack.frames):
             lines.append(f'  {frame.function_name}')
